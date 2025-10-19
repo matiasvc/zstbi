@@ -9,26 +9,30 @@ pub fn build(b: *std.Build) void {
     });
 
     zstbi.addIncludePath(b.path("libs/stbi"));
-    if (optimize == .Debug) {
-        // TODO: Workaround for Zig bug.
-        zstbi.addCSourceFile(.{
-            .file = b.path("src/zstbi.c"),
-            .flags = &.{
-                "-std=c99",
-                "-fno-sanitize=undefined",
-                "-g",
-                "-O0",
-            },
-        });
-    } else {
-        zstbi.addCSourceFile(.{
-            .file = b.path("src/zstbi.c"),
-            .flags = &.{
-                "-std=c99",
-                "-fno-sanitize=undefined",
-            },
-        });
-    }
+
+    const base_flags = &[_][]const u8{
+        "-std=c99",
+        "-fno-sanitize=undefined",
+        "-O3",
+    };
+
+    const flags: []const []const u8 = switch (target.result.cpu.arch) {
+        .x86_64 => base_flags ++ &[_][]const u8{
+            "-march=x86-64-v2",
+            "-msse2",
+            "-DSTBI_SSE2",
+        },
+        .aarch64 => base_flags ++ &[_][]const u8{
+            "-march=armv8-a",
+            "-DSTBI_NEON",
+        },
+        else => base_flags,
+    };
+
+    zstbi.addCSourceFile(.{
+        .file = b.path("src/zstbi.c"),
+        .flags = flags,
+    });
 
     if (target.result.os.tag == .emscripten) {
         zstbi.addIncludePath(.{
