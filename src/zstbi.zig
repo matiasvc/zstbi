@@ -2,9 +2,10 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 
-pub fn init(allocator: std.mem.Allocator) void {
+pub fn init(allocator: std.mem.Allocator, io: std.Io) void {
     assert(mem_allocator == null);
     mem_allocator = allocator;
+    mem_io = io;
     mem_allocations = std.AutoHashMap(usize, usize).init(allocator);
 
     // stb image
@@ -379,15 +380,16 @@ pub fn setFlipVerticallyOnWrite(should_flip: bool) void {
 
 var mem_allocator: ?std.mem.Allocator = null;
 var mem_allocations: ?std.AutoHashMap(usize, usize) = null;
-var mem_mutex: std.Thread.Mutex = .{};
+var mem_io: std.Io = undefined;
+var mem_mutex: std.Io.Mutex = .init;
 const mem_alignment = 16;
 
 extern var zstbiMallocPtr: ?*const fn (size: usize) callconv(.c) ?*anyopaque;
 extern var zstbiwMallocPtr: ?*const fn (size: usize) callconv(.c) ?*anyopaque;
 
 fn zstbiMalloc(size: usize) callconv(.c) ?*anyopaque {
-    mem_mutex.lock();
-    defer mem_mutex.unlock();
+    mem_mutex.lockUncancelable(mem_io);
+    defer mem_mutex.unlock(mem_io);
 
     const mem = mem_allocator.?.alignedAlloc(
         u8,
@@ -404,8 +406,8 @@ extern var zstbiReallocPtr: ?*const fn (ptr: ?*anyopaque, size: usize) callconv(
 extern var zstbiwReallocPtr: ?*const fn (ptr: ?*anyopaque, size: usize) callconv(.c) ?*anyopaque;
 
 fn zstbiRealloc(ptr: ?*anyopaque, size: usize) callconv(.c) ?*anyopaque {
-    mem_mutex.lock();
-    defer mem_mutex.unlock();
+    mem_mutex.lockUncancelable(mem_io);
+    defer mem_mutex.unlock(mem_io);
 
     const old_size = if (ptr != null) mem_allocations.?.get(@intFromPtr(ptr.?)).? else 0;
     const old_mem = if (old_size > 0)
@@ -430,8 +432,8 @@ extern var zstbiwFreePtr: ?*const fn (maybe_ptr: ?*anyopaque) callconv(.c) void;
 
 fn zstbiFree(maybe_ptr: ?*anyopaque) callconv(.c) void {
     if (maybe_ptr) |ptr| {
-        mem_mutex.lock();
-        defer mem_mutex.unlock();
+        mem_mutex.lockUncancelable(mem_io);
+        defer mem_mutex.unlock(mem_io);
 
         const size = mem_allocations.?.fetchRemove(@intFromPtr(ptr)).?.value;
         const mem = @as([*]align(mem_alignment) u8, @ptrCast(@alignCast(ptr)))[0..size];
